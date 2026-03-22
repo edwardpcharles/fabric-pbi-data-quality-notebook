@@ -68,7 +68,7 @@ This reduces production risk and catches DAX/model access issues early.
 Open **`data_quality_setup_notebook.ipynb`** in Fabric:
 
 1. Open `data_quality_config_notebook.ipynb` and set `LAKEHOUSE_NAME` / `SCHEMA_NAME`
-2. Return to setup notebook and **Run All** — creates two tables: `check_registry` and `validation_results`
+2. Return to setup notebook and **Run All** — creates required tables: `check_registry`, `check_baseline_config`, and `validation_results`
 
 ✓ Done. Your tables are ready.
 
