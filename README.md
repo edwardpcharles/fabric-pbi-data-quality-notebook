@@ -25,7 +25,7 @@ Instead of manually comparing values, this system:
 │ - Load registered checks                                │
 │ - Execute DAX for each model                            │
 │ - Compare to baseline                                   │
-│ - Write results                                         │
+│ - Write results (crash-safe, resumes where it left off) │
 │ - Maintain tables                                       │
 └────────────────────────┬────────────────────────────────┘
                          │
@@ -36,16 +36,32 @@ Instead of manually comparing values, this system:
 │ - validation_results (pass/fail history)                │
 └────────────────────────┬────────────────────────────────┘
                          │
-                         ▼
-              ┌──────────────────┐
-              │ Query results    │
-              │ Find failures    │
-              └──────────────────┘
+             ┌───────────┴────────────┐
+             ▼                        ▼
+  ┌──────────────────┐    ┌──────────────────────────┐
+  │ Query results    │    │ On-demand reruns          │
+  │ Find failures    │    │ - Rerun all failures      │
+  │ Power BI reports │    │ - Rerun a specific check  │
+  └──────────────────┘    └──────────────────────────┘
 ```
 
 ---
 
 ## Getting Started (5 minutes)
+
+### Quick Setup Checklist (Business Analyst)
+
+Use this checklist for first-time setup:
+
+1. Confirm you can open the target workspace and semantic models in Fabric.
+2. Set environment values in `data_quality_config.py`.
+3. Run `data_quality_setup_notebook.ipynb` once.
+4. Run `data_quality_add_checks_notebook.ipynb` and add 1-2 pilot checks first.
+5. Run `data_quality_smoke_test_notebook.ipynb` and ensure it passes.
+6. Run `data_quality_validation_job_notebook.ipynb` manually and verify rows are written to `validation_results`.
+7. Only after pilot success, add your full check list and schedule the daily job.
+
+This reduces production risk and catches DAX/model access issues early.
 
 ### 1. Run Setup (One-Time)
 
@@ -67,20 +83,22 @@ Open **`data_quality_add_checks_notebook.ipynb`**:
 
 ```python
 checks = [
-    # (check_name,         model_name,       workspace_name,       dataset_name,         dax_expression,                            run_frequency)
-    ("Total Sales",        "Finance",        "Finance WS",         "Finance Model",      'EVALUATE ROW("value", [Sales Amount])',  "ONCE_PER_DAY"),
-    ("Total Sales",        "Sales AMER",     "Sales WS",           "Sales AMER Model",   'EVALUATE ROW("value", [Total Revenue])',"ONCE_PER_DAY"),
-    ("Total Sales",        "Sales EMEA",     "Sales WS",           "Sales EMEA Model",   'EVALUATE ROW("value", [Net Sales])',    "ONCE_PER_DAY"),
+  # (check_name,         model_name,       workspace_id,                           dataset_id,                             workspace_name,       dataset_name,         dax_expression,                            run_frequency)
+  ("Total Sales",        "Finance",        "11111111-2222-3333-4444-555555555555", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Finance WS",         "Finance Model",      'EVALUATE ROW("value", [Sales Amount])',  "ONCE_PER_DAY"),
+  ("Total Sales",        "Sales AMER",     "66666666-7777-8888-9999-000000000000", "ffffffff-1111-2222-3333-444444444444", "Sales WS",           "Sales AMER Model",   'EVALUATE ROW("value", [Total Revenue])',"ONCE_PER_DAY"),
+  ("Total Sales",        "Sales EMEA",     "66666666-7777-8888-9999-000000000000", "55555555-6666-7777-8888-999999999999", "Sales WS",           "Sales EMEA Model",   'EVALUATE ROW("value", [Net Sales])',    "ONCE_PER_DAY"),
 ]
 ```
 
 **Key Rules:**
 - **check_name** must be identical across all models for that metric (e.g., "Total Sales")
+- **workspace_id** and **dataset_id** are required for every row (use GUIDs, not display names)
+- The unique identity of a model row is `(check_name, workspace_id, dataset_id)`; `model_name` is a display label and can change.
 - **DAX expression** must return a **single number**, e.g. `EVALUATE ROW("value", [Sales Amount])`
 - **run_frequency**: 
   - `"ONCE_PER_DAY"` (default) — check runs max once per calendar day
   - `"MULTIPLE_PER_DAY"` — can execute this check multiple times per day
-- The **first model listed** for each check_name becomes the baseline for comparison
+- The baseline is chosen deterministically per `check_name`: alphabetically first `model_name`, then `workspace_id`, then `dataset_id`
 
 4. **Run All** — checks are registered
 
@@ -124,6 +142,8 @@ LAKEHOUSE_NAME = "MyLakehouse"   # Your existing Lakehouse
 SCHEMA_NAME    = "data_quality"  # New schema to create
 ```
 
+This notebook now reads config from `data_quality_config.py` (with fallback defaults).
+
 ---
 
 ### `data_quality_add_checks_notebook.ipynb`
@@ -132,13 +152,21 @@ SCHEMA_NAME    = "data_quality"  # New schema to create
 **What it does:**
 - Edit the `checks = [...]` list with your model names and DAX expressions
 - UPSERT them into `check_registry` (safe to re-run — won't create duplicates)
+- Uses `(check_name, workspace_id, dataset_id)` as the row identity key
+- Enforce that each `check_name` uses exactly one `run_frequency` across all models
 - Show you what's registered
 
 **Key Column:** `run_frequency`
 - `"ONCE_PER_DAY"` — skips if already ran today
 - `"MULTIPLE_PER_DAY"` — allows multiple runs per day
 
-**Safe to re-run anytime** — it only updates changed rows.
+**Safe to re-run anytime** — it updates changed rows, re-activates matching soft-deleted rows, and validates `run_frequency` consistency per `check_name`.
+
+Production hardening in this notebook:
+- Fail-fast validation for blank required fields
+- Fail-fast enum validation for `run_frequency`
+- Submission duplicate-key validation
+- Concurrency-aware MERGE retries with post-merge integrity check
 
 ---
 
@@ -148,11 +176,16 @@ SCHEMA_NAME    = "data_quality"  # New schema to create
 **What it does:**
 - Shows all registered checks
 - Lets you soft-delete (set `is_active = false`) or hard-delete (remove permanently)
+- Supports deleting one exact model identity row by `check_name + workspace_id + dataset_id`
 - Shows remaining active checks
 
 **Options:**
 ```python
 DELETE_METHOD = "soft"  # "soft" (is_active=false) or "hard" (permanent delete)
+
+# Selector format in to_delete:
+# (check_name, workspace_id_or_None, dataset_id_or_None)
+# If IDs are None, all rows for that check_name are targeted.
 ```
 
 **Soft delete is safer** — keeps historical data but won't run in future jobs.
@@ -166,21 +199,70 @@ DELETE_METHOD = "soft"  # "soft" (is_active=false) or "hard" (permanent delete)
 1. Loads all active checks from `check_registry`
 2. Skips checks that already ran today (if `run_frequency = "ONCE_PER_DAY"`)
 3. Executes each DAX expression for each model
-4. Compares results to the baseline (first model for that check)
+4. Compares results to the baseline (deterministic order: `model_name`, then `workspace_id`, then `dataset_id`)
 5. Writes PASS/FAIL/ERROR to `validation_results`
 6. Shows summary of failures
 7. Optimizes tables (consolidates small files, removes old versions, computes stats)
 
 **Key Features:**
-- **Crash-safe:** If it fails partway, re-run it and it picks up where it left off
-- **Idempotent:** Won't duplicate results if run twice
-- **Incremental writes:** Each result is written immediately (not batched)
-- **Automatic maintenance:** OPTIMIZE, VACUUM, ANALYZE run every day
+- **Crash-safe:** If it fails partway, re-run it and it resumes safely
+- **Idempotent per run:** Batch writes use `MERGE` keyed by `(run_id, check_name, workspace_id, dataset_id)` to avoid duplicate rows for the same run
+- **Timeout-guarded DAX:** Each DAX call uses best-effort timeout handling to reduce hanging-job risk
+- **Batched writes:** Results are written in batches for better performance at scale
+- **Scheduled maintenance:** OPTIMIZE, VACUUM, ANALYZE run only when enabled or on the configured maintenance weekday
 
 **Error Handling:**
 - Bad DAX expressions → captured as ERROR status with error message
 - Empty results → ERROR with "DAX returned empty result"
 - Execution continues on errors (doesn't stop the whole job)
+
+Configuration for this job is also read from `data_quality_config.py`.
+
+---
+
+### `data_quality_smoke_test_notebook.ipynb`
+**Purpose:** Pre-production and post-change validation gate  
+**When to run:** Before enabling schedules, and after schema/code changes  
+**What it does:**
+- Verifies both required tables exist
+- Verifies required columns exist in both tables
+- Verifies no duplicate identity keys in `check_registry`
+- Verifies active rows contain required IDs/names and valid `run_frequency`
+
+If any contract fails, the notebook raises an error and should block promotion/scheduling.
+
+---
+
+### `data_quality_rerun_failed_notebook.ipynb`
+**Purpose:** Rerun checks that failed or errored in a previous run  
+**When to run:** After a validation job run that has FAIL or ERROR results  
+**What it does:**
+- Looks up all `FAIL` / `ERROR` rows for a target date (defaults to today)
+- Re-executes the DAX for each failed check
+- Writes new results with a fresh `run_id` — original failure rows are preserved for audit history
+- Shows a results table for the new run
+
+**Config:**
+```python
+TARGET_DATE = None  # None = today, or set to "2026-03-21" for a specific date
+```
+
+---
+
+### `data_quality_rerun_check_notebook.ipynb`
+**Purpose:** Rerun a specific check on demand  
+**When to run:** Anytime you want to force a check to run, regardless of `run_frequency` or whether it ran today  
+**What it does:**
+1. Lists all active checks so you can see what's registered
+2. Prompts you for `check_name` and optionally `model_name + dataset_name (+ workspace_name when needed)`
+3. Resolves `workspace_id/dataset_id` from registry for identity-safe execution
+4. Executes the DAX and writes new results with a fresh `run_id`
+
+**Interactive — no hardcoded values needed.** Just run the cells in order and enter values when prompted.
+
+Identity note:
+- If you provide `model_name`, you must also provide `dataset_name` so the notebook can resolve stable IDs.
+- If `model_name + dataset_name` still maps to multiple rows, provide `workspace_name` to disambiguate.
 
 ---
 
@@ -188,14 +270,15 @@ DELETE_METHOD = "soft"  # "soft" (is_active=false) or "hard" (permanent delete)
 **Purpose:** Sample SQL queries for Power BI analytics  
 **When to use:** When building dashboards in Power BI Desktop  
 **What it contains:**
-- **Dimension tables:** Models, Checks, Calendar dates
+- **Dimension tables:** Models, Checks, Calendar dates, Model roles
 - **Fact tables:** All validation results, failures only, daily trends with pass rates
 - **Power BI setup guide:** Connection steps, relationship mapping, visualization suggestions
 
 **Included Queries:**
-- `Dim_Models` — List all models with baseline markers
+- `Dim_Models` — List all active models
 - `Dim_Checks` — List all registered checks with model counts
 - `Dim_Date` — Calendar dimension with year/month/day-of-week
+- `Dim_ModelRoles` — Role of each model in fact rows (Baseline vs Comparison)
 - `Fact_ValidationResults` — All results with computed flags (is_pass, is_fail, is_error, abs_delta_pct)
 - `Fact_Failures` — Subset of results where status = FAIL or ERROR
 - `Fact_Trends` — Daily aggregated results: pass_count, fail_count, error_count, pass_rate_pct
@@ -254,7 +337,7 @@ WHERE run_id = '12345678-abcd-1234-abcd-1234567890ab'
 
 ### Comparison Logic
 
-1. **Baseline:** For each `check_name`, the first `model_name` listed in `check_registry` is the baseline.
+1. **Baseline:** For each `check_name`, the baseline is selected in deterministic order: `model_name`, then `workspace_id`, then `dataset_id`.
    
 2. **Delta Calculation:**
    ```
@@ -301,6 +384,8 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 |--------|------|----------|---------|-------|
 | check_name | STRING | ✓ | "Total Sales" | Must be identical across all models for that metric |
 | model_name | STRING | ✓ | "Finance GAAP" | Your label for this model |
+| workspace_id | STRING | ✓ | "11111111-2222-3333-4444-555555555555" | Fabric workspace GUID for stable identity |
+| dataset_id | STRING | ✓ | "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" | Semantic model GUID for stable identity |
 | workspace_name | STRING | ✓ | "Finance Workspace" | Fabric workspace name |
 | dataset_name | STRING | ✓ | "Finance Model" | Semantic model name |
 | dax_expression | STRING | ✓ | `EVALUATE ROW("value", [Sales Amount])` | Must return single number |
@@ -316,6 +401,10 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 | run_timestamp | TIMESTAMP | Exact time of execution |
 | check_name | STRING | The metric being validated |
 | model_name | STRING | Which model this result is for |
+| workspace_id | STRING | Workspace GUID copied from registry for stable joins |
+| dataset_id | STRING | Dataset GUID copied from registry for stable joins |
+| workspace_name | STRING | Workspace display name copied from registry |
+| dataset_name | STRING | Dataset display name copied from registry |
 | result_value | DOUBLE | The DAX result for this model |
 | baseline_model | STRING | Name of the baseline model |
 | baseline_value | DOUBLE | The DAX result for baseline |
@@ -328,13 +417,26 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 
 ## Troubleshooting
 
+### Preflight Connectivity Warning Appears
+- This means at least one `workspace_name` / `dataset_name` pair in `check_registry` could not be reached.
+- Verify the row's `workspace_id` and `dataset_id` map to the expected model (IDs are the stable identity).
+- Open the semantic model in Fabric and confirm it still exists and is accessible.
+- Confirm the exact names in `check_registry` match Fabric names (including spaces/case).
+- Re-run the job; unreachable models will produce `ERROR` rows with details.
+
+### DAX Timed Out
+- Look for `DAX execution timed out` in `error_message`.
+- This usually means the DAX expression is expensive or the model is under load.
+- Test the DAX directly in the semantic model and optimize measures if needed.
+- If required, increase timeout in notebook config (`DAX_TIMEOUT_SECONDS`) after validation.
+
 ### Job Fails with "Bad DAX Expression"
 - Check the error message in `validation_results` table (`error_message` column)
 - Verify the DAX works in Power BI or Analysis Services directly
 - Common issue: referencing measure/column names that don't exist in that model
 
 ### Job Takes Too Long
-- Too many checks? (if you have 100s, consider batching runs)
+- Too many checks? (if you have 100s or 1000s, split into staged runs)
 - DAX queries are slow? Optimize them in your semantic models
 - First-time run includes OPTIMIZE/VACUUM — subsequent runs are faster
 
@@ -350,6 +452,30 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
   ("Total Sales", "Sales AMER", ..., 'EVALUATE ROW("value", [Total Revenue])'),
   ```
   The job compares both to Finance's value automatically.
+
+---
+
+## Production Runbook
+
+### Deployment and Promotion
+- Edit environment values only in `data_quality_config.py`.
+- Run notebooks in order: setup -> add_checks -> smoke_test -> validation_job.
+- Do not schedule jobs until smoke test passes.
+
+### Concurrency Policy
+- `check_registry` is treated as a concurrent-write table.
+- Setup enforces strict schema migration behavior and requires PK enforcement for concurrent-writer mode.
+- Add-check writes include retry-on-conflict and post-merge integrity checks.
+
+### Operational Checks (Daily)
+- Confirm validation job completed and review PASS/FAIL/ERROR counts.
+- Monitor ERROR rows for connectivity or DAX regressions.
+- Keep maintenance schedule (OPTIMIZE/VACUUM/ANALYZE) aligned with data volume.
+
+### Incident Response
+- If duplicate identity keys are reported, stop add/rerun workflows and deduplicate `check_registry` first.
+- If smoke test fails, treat as a release blocker until all failing contracts are resolved.
+- If validation errors spike, triage by `error_message` and affected `workspace_name/dataset_name`.
 
 ### Want to Re-Validate Today
 - If check is `ONCE_PER_DAY`: Change it to `MULTIPLE_PER_DAY`, re-run job, change back
@@ -375,11 +501,11 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 **Why this design?**
 
 - **Lakehouse Delta tables:** Immutable history, easy to partition by date, integrates with Fabric job scheduler
-- **Incremental writes:** Each result written immediately, so crashes don't lose partial progress
+- **Idempotent MERGE writes:** Batch MERGE avoids duplicate rows when rerunning a partially failed run
 - **ONCE_PER_DAY default:** Avoids redundant re-runs while supporting high-frequency validation
 - **Soft delete:** Lets you pause checks without losing history
-- **Automatic maintenance:** OPTIMIZE/VACUUM keep table lean without manual intervention
-- **run_id for idempotency:** Multiple runs of the same job don't create duplicates
+- **Scheduled maintenance controls:** OPTIMIZE/VACUUM/ANALYZE run when enabled or on configured maintenance day
+- **run_id tracking:** Every run is traceable and easy to query/review in audit scenarios
 
 ---
 
