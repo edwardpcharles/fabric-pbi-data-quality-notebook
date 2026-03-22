@@ -54,7 +54,7 @@ Instead of manually comparing values, this system:
 Use this checklist for first-time setup:
 
 1. Confirm you can open the target workspace and semantic models in Fabric.
-2. Set environment values in `data_quality_config.py`.
+2. Set environment values in `data_quality_config_notebook.ipynb`.
 3. Run `data_quality_setup_notebook.ipynb` once.
 4. Run `data_quality_add_checks_notebook.ipynb` and add 1-2 pilot checks first.
 5. Run `data_quality_smoke_test_notebook.ipynb` and ensure it passes.
@@ -67,9 +67,8 @@ This reduces production risk and catches DAX/model access issues early.
 
 Open **`data_quality_setup_notebook.ipynb`** in Fabric:
 
-1. Change `LAKEHOUSE_NAME` to your existing Lakehouse (e.g., `"MyLakehouse"`)
-2. (Optional) Change `SCHEMA_NAME` if you prefer a different schema name
-3. **Run All** — creates two tables: `check_registry` and `validation_results`
+1. Open `data_quality_config_notebook.ipynb` and set `LAKEHOUSE_NAME` / `SCHEMA_NAME`
+2. Return to setup notebook and **Run All** — creates two tables: `check_registry` and `validation_results`
 
 ✓ Done. Your tables are ready.
 
@@ -77,7 +76,7 @@ Open **`data_quality_setup_notebook.ipynb`** in Fabric:
 
 Open **`data_quality_add_checks_notebook.ipynb`**:
 
-1. Set `LAKEHOUSE_NAME` and `SCHEMA_NAME` to match above
+1. Confirm `data_quality_config_notebook.ipynb` values are correct
 2. Find the `checks = [...]` list (around line 20)
 3. Add one row per model per metric:
 
@@ -108,7 +107,7 @@ checks = [
 
 Open **`data_quality_validation_job_notebook.ipynb`**:
 
-1. Set `LAKEHOUSE_NAME` and `SCHEMA_NAME`
+1. Confirm `data_quality_config_notebook.ipynb` values are correct
 2. **Run All**
 
 The job will:
@@ -142,7 +141,17 @@ LAKEHOUSE_NAME = "MyLakehouse"   # Your existing Lakehouse
 SCHEMA_NAME    = "data_quality"  # New schema to create
 ```
 
-This notebook now reads config from `data_quality_config.py` (with fallback defaults).
+This notebook now reads config from `data_quality_config_notebook.ipynb` (with fallback defaults).
+
+---
+
+### `data_quality_config_notebook.ipynb`
+**Purpose:** Shared configuration source for all operational notebooks  
+**When to run:** This notebook is loaded by other notebooks using `%run`; edit values here whenever environment settings change  
+**What it does:**
+- Defines `LAKEHOUSE_NAME` and `SCHEMA_NAME`
+- Defines shared thresholds, retry/timeouts, and maintenance settings
+- Provides a single place to manage config values used across setup, add/delete, validation, rerun, smoke test, and Power BI query notebooks
 
 ---
 
@@ -216,7 +225,7 @@ DELETE_METHOD = "soft"  # "soft" (is_active=false) or "hard" (permanent delete)
 - Empty results → ERROR with "DAX returned empty result"
 - Execution continues on errors (doesn't stop the whole job)
 
-Configuration for this job is also read from `data_quality_config.py`.
+Configuration for this job is also read from `data_quality_config_notebook.ipynb`.
 
 ---
 
@@ -458,8 +467,8 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 ## Production Runbook
 
 ### Deployment and Promotion
-- Edit environment values only in `data_quality_config.py`.
-- Run notebooks in order: setup -> add_checks -> smoke_test -> validation_job.
+- Edit environment values only in `data_quality_config_notebook.ipynb`.
+- Run notebooks in order: config_notebook -> setup -> add_checks -> smoke_test -> validation_job.
 - Do not schedule jobs until smoke test passes.
 
 ### Concurrency Policy
