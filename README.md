@@ -156,7 +156,7 @@ This notebook now reads config from `data_quality_config_notebook.ipynb` (with f
 ---
 
 ### `data_quality_add_checks_notebook.ipynb`
-**Purpose:** Register and update checks  
+**Purpose:** Register checks in bulk  
 **When to run:** Anytime you want to add, change, or enable checks  
 **What it does:**
 - Edit the `checks = [...]` list with your model names and DAX expressions
@@ -176,6 +176,25 @@ Production hardening in this notebook:
 - Fail-fast enum validation for `run_frequency`
 - Submission duplicate-key validation
 - Concurrency-aware MERGE retries with post-merge integrity check
+
+For targeted edits to existing rows, use `data_quality_update_checks_notebook.ipynb`.
+
+---
+
+### `data_quality_update_checks_notebook.ipynb`
+**Purpose:** Update existing checks by identity selector  
+**When to run:** When you need to modify DAX, display names, run frequency, or active flag for specific rows  
+**What it does:**
+- Loads current rows from `check_registry`
+- Applies identity-safe updates using `(check_name, workspace_id, dataset_id)`
+- Allows partial updates (leave a field as `None` to keep existing value)
+- Validates selectors, allowed `run_frequency` values, and post-update frequency consistency
+
+**Typical use cases:**
+- Adjust one model's DAX expression without editing your full add list
+- Rename `model_name` / `workspace_name` / `dataset_name` labels
+- Change one check from `ONCE_PER_DAY` to `MULTIPLE_PER_DAY`
+- Reactivate or deactivate specific identity rows
 
 ---
 
@@ -469,6 +488,7 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 ### Deployment and Promotion
 - Edit environment values only in `data_quality_config_notebook.ipynb`.
 - Run notebooks in order: config_notebook -> setup -> add_checks -> smoke_test -> validation_job.
+- Use update_checks/delete_checks/rerun notebooks for ongoing operations after initial rollout.
 - Do not schedule jobs until smoke test passes.
 
 ### Concurrency Policy
