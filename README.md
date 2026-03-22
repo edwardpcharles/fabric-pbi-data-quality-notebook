@@ -32,7 +32,8 @@ Instead of manually comparing values, this system:
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │ Lakehouse Tables (data_quality schema)                  │
-│ - check_registry (what to validate)                     │
+│ - check_registry (what to validate per model row)       │
+│ - check_baseline_config (MODEL vs STATIC per check)     │
 │ - validation_results (pass/fail history)                │
 └────────────────────────┬────────────────────────────────┘
                          │
@@ -82,10 +83,10 @@ Open **`data_quality_add_checks_notebook.ipynb`**:
 
 ```python
 checks = [
-  # (check_name,         model_name,       workspace_id,                           dataset_id,                             workspace_name,       dataset_name,         dax_expression,                            run_frequency)
-  ("Total Sales",        "Finance",        "11111111-2222-3333-4444-555555555555", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Finance WS",         "Finance Model",      'EVALUATE ROW("value", [Sales Amount])',  "ONCE_PER_DAY"),
-  ("Total Sales",        "Sales AMER",     "66666666-7777-8888-9999-000000000000", "ffffffff-1111-2222-3333-444444444444", "Sales WS",           "Sales AMER Model",   'EVALUATE ROW("value", [Total Revenue])',"ONCE_PER_DAY"),
-  ("Total Sales",        "Sales EMEA",     "66666666-7777-8888-9999-000000000000", "55555555-6666-7777-8888-999999999999", "Sales WS",           "Sales EMEA Model",   'EVALUATE ROW("value", [Net Sales])',    "ONCE_PER_DAY"),
+  # (check_name,         model_name,       workspace_id,                           dataset_id,                             workspace_name,       dataset_name,         dax_expression,                            run_frequency,    fail_delta_pct_threshold)
+  ("Total Sales",        "Finance",        "11111111-2222-3333-4444-555555555555", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Finance WS",         "Finance Model",      'EVALUATE ROW("value", [Sales Amount])',  "ONCE_PER_DAY",  0.10),
+  ("Total Sales",        "Sales AMER",     "66666666-7777-8888-9999-000000000000", "ffffffff-1111-2222-3333-444444444444", "Sales WS",           "Sales AMER Model",   'EVALUATE ROW("value", [Total Revenue])',"ONCE_PER_DAY",  0.25),
+  ("Total Sales",        "Sales EMEA",     "66666666-7777-8888-9999-000000000000", "55555555-6666-7777-8888-999999999999", "Sales WS",           "Sales EMEA Model",   'EVALUATE ROW("value", [Net Sales])',    "ONCE_PER_DAY",  0.25),
 ]
 ```
 
@@ -94,10 +95,13 @@ checks = [
 - **workspace_id** and **dataset_id** are required for every row (use GUIDs, not display names)
 - The unique identity of a model row is `(check_name, workspace_id, dataset_id)`; `model_name` is a display label and can change.
 - **DAX expression** must return a **single number**, e.g. `EVALUATE ROW("value", [Sales Amount])`
-- **run_frequency**: 
+- **run_frequency**:
   - `"ONCE_PER_DAY"` (default) — check runs max once per calendar day
   - `"MULTIPLE_PER_DAY"` — can execute this check multiple times per day
-- The baseline is chosen deterministically per `check_name`: alphabetically first `model_name`, then `workspace_id`, then `dataset_id`
+- **fail_delta_pct_threshold** is required on every row you add and can vary across rows inside the same `check_name`
+- Baseline behavior is configured per `check_name` in `check_baseline_config`:
+  - `MODEL` uses the row where `is_baseline = true`
+  - `STATIC` uses `static_baseline_value`
 
 4. **Run All** — checks are registered
 
@@ -150,8 +154,10 @@ This notebook now reads config from `data_quality_config_notebook.ipynb` (with f
 **When to run:** This notebook is loaded by other notebooks using `%run`; edit values here whenever environment settings change  
 **What it does:**
 - Defines `LAKEHOUSE_NAME` and `SCHEMA_NAME`
-- Defines shared thresholds, retry/timeouts, and maintenance settings
+- Defines shared retry/timeouts and maintenance settings
 - Provides a single place to manage config values used across setup, add/delete, validation, rerun, smoke test, and Power BI query notebooks
+
+Row-level fail thresholds are not stored here. They are stored in `check_registry.fail_delta_pct_threshold`.
 
 ---
 
@@ -227,10 +233,13 @@ DELETE_METHOD = "soft"  # "soft" (is_active=false) or "hard" (permanent delete)
 1. Loads all active checks from `check_registry`
 2. Skips checks that already ran today (if `run_frequency = "ONCE_PER_DAY"`)
 3. Executes each DAX expression for each model
-4. Compares results to the baseline (deterministic order: `model_name`, then `workspace_id`, then `dataset_id`)
-5. Writes PASS/FAIL/ERROR to `validation_results`
-6. Shows summary of failures
-7. Optimizes tables (consolidates small files, removes old versions, computes stats)
+4. Resolves the baseline from `check_baseline_config`:
+   - `MODEL` compares to the active row where `is_baseline = true`
+   - `STATIC` compares to `static_baseline_value`
+5. Applies the row's `fail_delta_pct_threshold`
+6. Writes PASS/FAIL/ERROR to `validation_results`
+7. Shows summary of failures
+8. Optimizes tables (consolidates small files, removes old versions, computes stats)
 
 **Key Features:**
 - **Crash-safe:** If it fails partway, re-run it and it resumes safely
@@ -252,10 +261,10 @@ Configuration for this job is also read from `data_quality_config_notebook.ipynb
 **Purpose:** Pre-production and post-change validation gate  
 **When to run:** Before enabling schedules, and after schema/code changes  
 **What it does:**
-- Verifies both required tables exist
-- Verifies required columns exist in both tables
+- Verifies all three required tables exist
+- Verifies required columns exist in `check_registry`, `check_baseline_config`, and `validation_results`
 - Verifies no duplicate identity keys in `check_registry`
-- Verifies active rows contain required IDs/names and valid `run_frequency`
+- Verifies active rows contain required IDs/names, valid `run_frequency`, and valid `fail_delta_pct_threshold`
 
 If any contract fails, the notebook raises an error and should block promotion/scheduling.
 
@@ -307,8 +316,8 @@ Identity note:
 - `Dim_Checks` — List all registered checks with model counts
 - `Dim_Date` — Calendar dimension with year/month/day-of-week
 - `Dim_ModelRoles` — Role of each model in fact rows (Baseline vs Comparison)
-- `Fact_ValidationResults` — All results with computed flags (is_pass, is_fail, is_error, abs_delta_pct)
-- `Fact_Failures` — Subset of results where status = FAIL or ERROR
+- `Fact_ValidationResults` — All results with computed flags (is_pass, is_fail, is_error, abs_delta_pct) and the row-level fail threshold used
+- `Fact_Failures` — Subset of results where status = FAIL or ERROR, including the row-level fail threshold used
 - `Fact_Trends` — Daily aggregated results: pass_count, fail_count, error_count, pass_rate_pct
 
 **How to use:**
@@ -332,7 +341,7 @@ Once the validation job runs, results are in `validation_results`. You can query
 
 ### View Today's Results
 ```sql
-SELECT check_name, model_name, result_value, baseline_value, delta_pct, status
+SELECT check_name, model_name, result_value, baseline_value, delta_pct, fail_delta_pct_threshold, status
 FROM MyLakehouse.data_quality.validation_results
 WHERE run_date = CAST(CURRENT_DATE() AS DATE)
 ORDER BY check_name, model_name
@@ -340,7 +349,7 @@ ORDER BY check_name, model_name
 
 ### View Failures Only
 ```sql
-SELECT check_name, model_name, result_value, baseline_value, delta_pct, status, error_message
+SELECT check_name, model_name, result_value, baseline_value, delta_pct, fail_delta_pct_threshold, status, error_message
 FROM MyLakehouse.data_quality.validation_results
 WHERE run_date = CAST(CURRENT_DATE() AS DATE) AND status != 'PASS'
 ```
@@ -365,18 +374,20 @@ WHERE run_id = '12345678-abcd-1234-abcd-1234567890ab'
 
 ### Comparison Logic
 
-1. **Baseline:** For each `check_name`, the baseline is selected in deterministic order: `model_name`, then `workspace_id`, then `dataset_id`.
-   
+1. **Baseline:** For each `check_name`, the baseline comes from `check_baseline_config`.
+   - `MODEL` mode compares against the active row where `is_baseline = true`
+   - `STATIC` mode compares against `static_baseline_value`
+
 2. **Delta Calculation:**
-   ```
+   ```text
    absolute_delta = result_value - baseline_value
    relative_pct   = (absolute_delta / baseline_value) * 100
    ```
 
 3. **Pass/Fail Threshold:**
-   - PASS: `|relative_pct| <= 0.01%` (i.e., nearly identical)
-   - FAIL: `|relative_pct| > 0.01%`
-   - ERROR: DAX expression threw an exception or returned empty
+   - PASS: `|relative_pct| <= fail_delta_pct_threshold` for that specific `(check_name, workspace_id, dataset_id)` row
+   - FAIL: `|relative_pct| > fail_delta_pct_threshold` for that specific row
+   - ERROR: DAX expression threw an exception, returned empty, or baseline resolution failed
 
 ### Crash Recovery
 
@@ -418,6 +429,7 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 | dataset_name | STRING | ✓ | "Finance Model" | Semantic model name |
 | dax_expression | STRING | ✓ | `EVALUATE ROW("value", [Sales Amount])` | Must return single number |
 | run_frequency | STRING | ✓ | "ONCE_PER_DAY" | "ONCE_PER_DAY" or "MULTIPLE_PER_DAY" |
+| fail_delta_pct_threshold | DOUBLE | ✓ | 0.5 | Row-level percent threshold. Example: 0.5 means fail when `|delta_pct| > 0.5` |
 | is_active | BOOLEAN | ✓ | true | Set to false to skip without deleting |
 
 ### validation_results Columns
@@ -438,6 +450,7 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 | baseline_value | DOUBLE | The DAX result for baseline |
 | absolute_delta | DOUBLE | result_value - baseline_value |
 | delta_pct | DOUBLE | (absolute_delta / baseline_value) × 100 |
+| fail_delta_pct_threshold | DOUBLE | Threshold copied from `check_registry` for the row execution |
 | status | STRING | PASS / FAIL / ERROR |
 | error_message | STRING | Exception message if ERROR |
 
