@@ -16,16 +16,16 @@ Instead of manually comparing values, this system:
 
 ```mermaid
 flowchart TD
-    Models["Your Semantic Models<br>Finance, Sales AMER, Sales EMEA"]
+    Models["Your Semantic Models<br>Finance, Sales AMER, EMEA"]
     
-    subgraph Job [Daily Validation Job - data_quality_validation_job]
-        J["• Load registered checks<br>• Execute DAX for each model<br>• Compare to baseline<br>• Write results (crash-safe,<br>resumes where it left off)<br>• Maintain tables"]
+    subgraph Job [Daily Validation Job]
+        J["• Load registered checks<br>• Execute DAX for each model<br>• Compare to baseline<br>• Write results (crash-safe)<br>• Maintain tables"]
     end
     
     Models -- DAX queries --> Job
     
-    subgraph Lakehouse [Lakehouse Tables - data_quality schema]
-        L["• check_registry<br>(what to validate per model row)<br>• check_baseline_config<br>(MODEL vs STATIC per check)<br>• validation_results<br>(pass/fail history)"]
+    subgraph Lakehouse [Lakehouse Tables]
+        L["• check_registry<br>(what to validate)<br>• check_baseline<br>(MODEL vs STATIC)<br>• validation_results<br>(pass/fail history)"]
     end
     
     Job --> Lakehouse
@@ -44,13 +44,13 @@ flowchart TD
 ```mermaid
 flowchart TD
     Config["1. config.py<br>Define LAKEHOUSE_NAME<br>and SCHEMA_NAME"]
-    Setup["2. 01_data_quality_setup_notebook.ipynb<br>Creates check_registry &<br>validation_results tables"]
-    Manage["3. 02_data_quality_manage_checks_notebook.ipynb<br>Register your models<br>and DAX expressions"]
-    Smoke["4. 03_data_quality_smoke_test_notebook.ipynb<br>Verifies schema constraints<br>and configuration"]
-    Job["5. 04_data_quality_validation_job_notebook.ipynb<br>Schedule this daily.<br>Executes DAX and logs results"]
+    Setup["2. 01_data_quality_setup<br>Creates check_registry &<br>validation_results tables"]
+    Manage["3. 02_data_quality_manage_checks<br>Register your models<br>and DAX expressions"]
+    Smoke["4. 03_data_quality_smoke_test<br>Verifies schema constraints<br>and configuration"]
+    Job["5. 04_data_quality_validation_job<br>Schedule this daily.<br>Executes DAX and logs results"]
     
     subgraph Operations [Ongoing Operations & Reporting]
-        OpsFiles["• 05_data_quality_rerun_check_notebook.ipynb<br>• 06_data_quality_rerun_failed_notebook.ipynb<br>• 07_data_quality_delete_checks_notebook.ipynb<br>• 08_power_bi_queries_notebook.ipynb"]
+        OpsFiles["• 05_data_quality_rerun_check<br>• 06_data_quality_rerun_failed<br>• 07_data_quality_delete_checks<br>• 08_power_bi_queries"]
     end
 
     Config --> Setup --> Manage --> Smoke --> Job --> Operations
