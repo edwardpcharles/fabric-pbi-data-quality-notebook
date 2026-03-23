@@ -16,22 +16,22 @@ Instead of manually comparing values, this system:
 
 ```mermaid
 flowchart TD
-    Models[Your Semantic Models<br>Finance, Sales AMER, Sales EMEA]
+    Models["Your Semantic Models<br>Finance, Sales AMER, Sales EMEA"]
     
     subgraph Job [Daily Validation Job - data_quality_validation_job]
-        J["• Load registered checks<br>• Execute DAX for each model<br>• Compare to baseline<br>• Write results (crash-safe, resumes where it left off)<br>• Maintain tables"]
+        J["• Load registered checks<br>• Execute DAX for each model<br>• Compare to baseline<br>• Write results (crash-safe,<br>resumes where it left off)<br>• Maintain tables"]
     end
     
     Models -- DAX queries --> Job
     
     subgraph Lakehouse [Lakehouse Tables - data_quality schema]
-        L["• check_registry (what to validate per model row)<br>• check_baseline_config (MODEL vs STATIC per check)<br>• validation_results (pass/fail history)"]
+        L["• check_registry<br>(what to validate per model row)<br>• check_baseline_config<br>(MODEL vs STATIC per check)<br>• validation_results<br>(pass/fail history)"]
     end
     
     Job --> Lakehouse
     
-    Reports[Query results<br>Find failures<br>Power BI reports]
-    Reruns[On-demand reruns<br>• Rerun all failures<br>• Rerun a specific check]
+    Reports["Query results<br>Find failures<br>Power BI reports"]
+    Reruns["On-demand reruns<br>• Rerun all failures<br>• Rerun a specific check"]
     
     Lakehouse --> Reports
     Lakehouse --> Reruns
@@ -43,11 +43,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Config["1. config.py<br>Define LAKEHOUSE_NAME and SCHEMA_NAME"]
-    Setup["2. 01_data_quality_setup_notebook.ipynb<br>Creates check_registry & validation_results tables"]
-    Manage["3. 02_data_quality_manage_checks_notebook.ipynb<br>Register your models and DAX expressions"]
-    Smoke["4. 03_data_quality_smoke_test_notebook.ipynb<br>Verifies schema constraints and configuration"]
-    Job["5. 04_data_quality_validation_job_notebook.ipynb<br>Schedule this daily. Executes DAX and logs results"]
+    Config["1. config.py<br>Define LAKEHOUSE_NAME<br>and SCHEMA_NAME"]
+    Setup["2. 01_data_quality_setup_notebook.ipynb<br>Creates check_registry &<br>validation_results tables"]
+    Manage["3. 02_data_quality_manage_checks_notebook.ipynb<br>Register your models<br>and DAX expressions"]
+    Smoke["4. 03_data_quality_smoke_test_notebook.ipynb<br>Verifies schema constraints<br>and configuration"]
+    Job["5. 04_data_quality_validation_job_notebook.ipynb<br>Schedule this daily.<br>Executes DAX and logs results"]
     
     subgraph Operations [Ongoing Operations & Reporting]
         OpsFiles["• 05_data_quality_rerun_check_notebook.ipynb<br>• 06_data_quality_rerun_failed_notebook.ipynb<br>• 07_data_quality_delete_checks_notebook.ipynb<br>• 08_power_bi_queries_notebook.ipynb"]
