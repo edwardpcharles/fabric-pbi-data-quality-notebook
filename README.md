@@ -16,10 +16,10 @@ Instead of manually comparing values, this system:
 
 ```mermaid
 flowchart TD
-    Models["Your Semantic Models<br>Finance, Sales AMER, EMEA"]
+    Models["Your Semantic Models<br>Finance, Sales AMER,<br>EMEA"]
     
     subgraph Job [Daily Validation Job]
-        J["• Load registered checks<br>• Execute DAX for each model<br>• Compare to baseline<br>• Write results (crash-safe)<br>• Maintain tables"]
+        J["• Load registered checks<br>• Execute DAX per model<br>• Compare to baseline<br>• Write results<br>(crash-safe)<br>• Maintain tables"]
     end
     
     Models -- DAX queries --> Job
@@ -44,13 +44,13 @@ flowchart TD
 ```mermaid
 flowchart TD
     Config["1. config.py<br>Define LAKEHOUSE_NAME<br>and SCHEMA_NAME"]
-    Setup["2. 01_data_quality_setup<br>Creates check_registry &<br>validation_results tables"]
-    Manage["3. 02_data_quality_manage_checks<br>Register your models<br>and DAX expressions"]
-    Smoke["4. 03_data_quality_smoke_test<br>Verifies schema constraints<br>and configuration"]
-    Job["5. 04_data_quality_validation_job<br>Schedule this daily.<br>Executes DAX and logs results"]
+    Setup["2. 01_data_quality_<br>setup<br>Creates check_registry &<br>validation_results tables"]
+    Manage["3. 02_data_quality_<br>manage_checks<br>Register your models<br>and DAX expressions"]
+    Smoke["4. 03_data_quality_<br>smoke_test<br>Verifies schema<br>constraints/config"]
+    Job["5. 04_data_quality_<br>validation_job<br>Schedule this daily.<br>Executes DAX & logs results"]
     
-    subgraph Operations [Ongoing Operations & Reporting]
-        OpsFiles["• 05_data_quality_rerun_check<br>• 06_data_quality_rerun_failed<br>• 07_data_quality_delete_checks<br>• 08_power_bi_queries"]
+    subgraph Operations [Ongoing Operations]
+        OpsFiles["• 05_data_quality_<br>rerun_check<br>• 06_data_quality_<br>rerun_failed<br>• 07_data_quality_<br>delete_checks<br>• 08_power_bi_queries"]
     end
 
     Config --> Setup --> Manage --> Smoke --> Job --> Operations
