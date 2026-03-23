@@ -436,20 +436,39 @@ This is the key distinction:
 - `STATIC` mode does **not** execute a baseline model DAX. It uses `static_baseline_value` directly as `baseline_value`.
 - If you add another model row under the same `check_name`, that row is also evaluated and compared to the same baseline (model-based or static, depending on mode).
 
-```mermaid
-flowchart TD
-   A[Start check_name run] --> B{baseline_mode}
-   B -->|MODEL| C[Resolve active baseline row]
-   C --> D[Execute baseline row DAX]
-   D --> E[baseline_value from baseline row result]
-   B -->|STATIC| F[Read static_baseline_value]
-   F --> E
-   E --> G[Loop active model rows for this check_name]
-   G --> H[Execute row dax_expression]
-   H --> I[result_value]
-   I --> J[Compute delta vs baseline_value]
-   J --> K[Apply row fail_delta_pct_threshold]
-   K --> L[Write PASS / FAIL / ERROR]
+```text
+┌─────────────────────────────────────────────────────────┐
+│ Parent Metric (e.g., check_name = "Total Sales")        │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│ 1. BASELINE VALUE GENERATION                            │
+│                                                         │
+│ If MODEL mode:                 If STATIC mode:          │
+│ ▶ Execute DAX of the           ▶ Use hardcoded number   │
+│   'is_baseline' model row      ▶ (e.g. 1,500,000)       │
+│                                                         │
+│ ➔ Both paths yield the final BASELINE VALUE.            │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│ 2. VALIDATION OF ALL CHECKS                             │
+│                                                         │
+│ For EVERY active check row under this Parent Metric     │
+│ (Including the check row you used as the baseline!)     │
+│                                                         │
+│ Check: Finance Model (The assigned baseline)            │
+│ ▶ Execute DAX                                           │
+│ ▶ Compare result vs BASELINE VALUE                      │
+│ ▶ Pass if Delta <= its own fail_delta_pct_threshold     │
+│                                                         │
+│ Check: EMEA Model                                       │
+│ ▶ Execute DAX                                           │
+│ ▶ Compare result vs BASELINE VALUE                      │
+│ ▶ Pass if Delta <= its own fail_delta_pct_threshold     │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Notes
