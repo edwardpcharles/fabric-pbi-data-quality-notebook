@@ -57,7 +57,7 @@ Use this checklist for first-time setup:
 1. Confirm you can open the target workspace and semantic models in Fabric.
 2. Upload `config.py` to your Fabric Lakehouse at `/Files/code/config.py` and update LAKEHOUSE_NAME / SCHEMA_NAME.
 3. Run `data_quality_setup_notebook.ipynb` once.
-4. Run `data_quality_add_checks_notebook.ipynb` and add 1-2 pilot checks first.
+4. Run `data_quality_update_checks_notebook.ipynb` and add 1-2 pilot checks first.
 5. Run `data_quality_smoke_test_notebook.ipynb` and ensure it passes.
 6. Run `data_quality_validation_job_notebook.ipynb` manually and verify rows are written to `validation_results`.
 7. Only after pilot success, add your full check list and schedule the daily job.
@@ -76,7 +76,7 @@ Before running, configure your environment:
 
 ### 2. Register Your First Checks
 
-Open **`data_quality_add_checks_notebook.ipynb`**:
+Open **`data_quality_update_checks_notebook.ipynb`**:
 
 1. Confirm `config.py` values are correct (LAKEHOUSE_NAME, SCHEMA_NAME)
 2. Find the `checks = [...]` list (around line 20)
@@ -164,7 +164,7 @@ Row-level fail thresholds are not stored here. They are stored in `check_registr
 
 ---
 
-### `data_quality_add_checks_notebook.ipynb`
+### `data_quality_update_checks_notebook.ipynb`
 **Purpose:** Register checks in bulk  
 **When to run:** Anytime you want to add, change, or enable checks  
 **What it does:**
@@ -566,3 +566,4 @@ For issues or questions:
 
 **Version:** 1.0  
 **Last Updated:** March 20, 2026
+

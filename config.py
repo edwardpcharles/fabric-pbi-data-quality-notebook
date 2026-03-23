@@ -14,7 +14,7 @@ Row-level fail thresholds are stored in check_registry.fail_delta_pct_threshold,
 """
 
 # Environment
-LAKEHOUSE_NAME = "MyLakehouse"
+LAKEHOUSE_NAME = "data_quality"
 SCHEMA_NAME = "data_quality"
 
 # Validation retry and execution behavior
