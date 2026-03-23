@@ -404,18 +404,18 @@ This is the key distinction:
 
 ```mermaid
 flowchart TD
-   A[Start check_name run] --> B{baseline_mode}
-   B -->|MODEL| C[Resolve active baseline row]
-   C --> D[Execute baseline row DAX]
-   D --> E[baseline_value from baseline row result]
-   B -->|STATIC| F[Read static_baseline_value]
+   A["Start check_name run"] --> B{"baseline_mode"}
+   B -->|MODEL| C["Resolve active<br>baseline row"]
+   C --> D["Execute baseline<br>row DAX"]
+   D --> E["baseline_value from<br>baseline row result"]
+   B -->|STATIC| F["Read<br>static_baseline_value"]
    F --> E
-   E --> G[Loop active model rows for this check_name]
-   G --> H[Execute row dax_expression]
-   H --> I[result_value]
-   I --> J[Compute delta vs baseline_value]
-   J --> K[Apply row fail_delta_pct_threshold]
-   K --> L[Write PASS / FAIL / ERROR]
+   E --> G["Loop active model rows<br>for this check_name"]
+   G --> H["Execute row<br>dax_expression"]
+   H --> I["result_value"]
+   I --> J["Compute delta vs<br>baseline_value"]
+   J --> K["Apply row<br>fail_delta_pct_threshold"]
+   K --> L["Write PASS /<br>FAIL / ERROR"]
 ```
 
 ### Notes
