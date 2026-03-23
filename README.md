@@ -48,6 +48,50 @@ Instead of manually comparing values, this system:
 
 ---
 
+## Setup & Execution Flow
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ 1. config.py                                            │
+│ Define LAKEHOUSE_NAME and SCHEMA_NAME                   │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ 2. 01_data_quality_setup_notebook.ipynb                 │
+│ Creates check_registry & validation_results tables      │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ 3. 02_data_quality_manage_checks_notebook.ipynb         │
+│ Register your models and DAX expressions                │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ 4. 03_data_quality_smoke_test_notebook.ipynb            │
+│ Verifies schema constraints and configuration           │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ 5. 04_data_quality_validation_job_notebook.ipynb        │
+│ Schedule this daily. Executes DAX and logs results      │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ Ongoing Operations & Reporting                          │
+│ - 05_data_quality_rerun_check_notebook.ipynb            │
+│ - 06_data_quality_rerun_failed_notebook.ipynb           │
+│ - 07_data_quality_delete_checks_notebook.ipynb          │
+│ - 08_power_bi_queries_notebook.ipynb                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Getting Started (5 minutes)
 
 ### Quick Setup Checklist (Business Analyst)
@@ -56,10 +100,10 @@ Use this checklist for first-time setup:
 
 1. Confirm you can open the target workspace and semantic models in Fabric.
 2. Upload `config.py` to your Fabric Lakehouse at `/Files/code/config.py` and update LAKEHOUSE_NAME / SCHEMA_NAME.
-3. Run `data_quality_setup_notebook.ipynb` once.
-4. Run `data_quality_update_checks_notebook.ipynb` and add 1-2 pilot checks first.
-5. Run `data_quality_smoke_test_notebook.ipynb` and ensure it passes.
-6. Run `data_quality_validation_job_notebook.ipynb` manually and verify rows are written to `validation_results`.
+3. Run `01_data_quality_setup_notebook.ipynb` once.
+4. Run `02_data_quality_manage_checks_notebook.ipynb` and add 1-2 pilot checks first.
+5. Run `03_data_quality_smoke_test_notebook.ipynb` and ensure it passes.
+6. Run `04_data_quality_validation_job_notebook.ipynb` manually and verify rows are written to `validation_results`.
 7. Only after pilot success, add your full check list and schedule the daily job.
 
 This reduces production risk and catches DAX/model access issues early.
@@ -70,13 +114,13 @@ Before running, configure your environment:
 
 1. Upload `config.py` to Fabric Lakehouse at `/Files/code/config.py`
 2. Edit `config.py` and update `LAKEHOUSE_NAME` and `SCHEMA_NAME` with your actual values
-3. Open **`data_quality_setup_notebook.ipynb`** in Fabric and **Run All** — creates required tables: `check_registry`, `check_baseline_config`, and `validation_results`
+3. Open **`01_data_quality_setup_notebook.ipynb`** in Fabric and **Run All** — creates required tables: `check_registry`, `check_baseline_config`, and `validation_results`
 
 ✓ Done. Your tables are ready.
 
 ### 2. Register Your First Checks
 
-Open **`data_quality_update_checks_notebook.ipynb`**:
+Open **`02_data_quality_manage_checks_notebook.ipynb`**:
 
 1. Confirm `config.py` values are correct (LAKEHOUSE_NAME, SCHEMA_NAME)
 2. Find the `checks = [...]` list (around line 20)
@@ -110,7 +154,7 @@ checks = [
 
 ### 3. Run the Daily Job (Manually or Scheduled)
 
-Open **`data_quality_validation_job_notebook.ipynb`**:
+Open **`04_data_quality_validation_job_notebook.ipynb`**:
 
 1. Confirm `config.py` values are correct
 2. **Run All**
@@ -132,7 +176,7 @@ In Fabric, create a Job Scheduler → select this notebook → set to run daily 
 
 ## Notebooks Reference
 
-### `data_quality_setup_notebook.ipynb`
+### `01_data_quality_setup_notebook.ipynb`
 **Purpose:** One-time initialization  
 **When to run:** Once when you first set up the system  
 **What it does:**
@@ -164,13 +208,14 @@ Row-level fail thresholds are not stored here. They are stored in `check_registr
 
 ---
 
-### `data_quality_update_checks_notebook.ipynb`
+### `02_data_quality_manage_checks_notebook.ipynb`
 **Purpose:** Register checks in bulk  
 **When to run:** Anytime you want to add, change, or enable checks  
 **What it does:**
 - Edit the `checks = [...]` list with your model names and DAX expressions
 - UPSERT them into `check_registry` (safe to re-run — won't create duplicates)
 - Uses `(check_name, workspace_id, dataset_id)` as the row identity key
+- When an active row's model metadata, DAX, frequency, or threshold changes, the prior active row is soft-retired and a new active version is inserted
 - Enforce that each `check_name` uses exactly one `run_frequency` across all models
 - Show you what's registered
 
@@ -178,7 +223,7 @@ Row-level fail thresholds are not stored here. They are stored in `check_registr
 - `"ONCE_PER_DAY"` — skips if already ran today
 - `"MULTIPLE_PER_DAY"` — allows multiple runs per day
 
-**Safe to re-run anytime** — it updates changed rows, re-activates matching soft-deleted rows, and validates `run_frequency` consistency per `check_name`.
+**Safe to re-run anytime** — it updates control flags in place, versions substantive row changes by retiring the prior active row, and validates `run_frequency` consistency per active `check_name`.
 
 Production hardening in this notebook:
 - Fail-fast validation for blank required fields
@@ -186,16 +231,17 @@ Production hardening in this notebook:
 - Submission duplicate-key validation
 - Concurrency-aware MERGE retries with post-merge integrity check
 
-For targeted edits to existing rows, use `data_quality_update_checks_notebook.ipynb`.
+For targeted edits to existing rows, use `02_data_quality_manage_checks_notebook.ipynb`.
 
 ---
 
-### `data_quality_update_checks_notebook.ipynb`
+### `02_data_quality_manage_checks_notebook.ipynb`
 **Purpose:** Update existing checks by identity selector  
 **When to run:** When you need to modify DAX, display names, run frequency, or active flag for specific rows  
 **What it does:**
 - Loads current rows from `check_registry`
 - Applies identity-safe updates using `(check_name, workspace_id, dataset_id)`
+- Retires the prior active row and inserts a new active version when row content changes
 - Allows partial updates (leave a field as `None` to keep existing value)
 - Validates selectors, allowed `run_frequency` values, and post-update frequency consistency
 
@@ -207,7 +253,7 @@ For targeted edits to existing rows, use `data_quality_update_checks_notebook.ip
 
 ---
 
-### `data_quality_delete_checks_notebook.ipynb`
+### `07_data_quality_delete_checks_notebook.ipynb`
 **Purpose:** Manage (deactivate or delete) checks  
 **When to run:** When you want to stop validating a check  
 **What it does:**
@@ -229,7 +275,7 @@ DELETE_METHOD = "soft"  # "soft" (is_active=false) or "hard" (permanent delete)
 
 ---
 
-### `data_quality_validation_job_notebook.ipynb`
+### `04_data_quality_validation_job_notebook.ipynb`
 **Purpose:** Daily validation execution  
 **When to run:** Every day (schedule in Fabric Job Scheduler)  
 **What it does:**
@@ -260,7 +306,7 @@ Configuration for this job is also read from `config.py`.
 
 ---
 
-### `data_quality_smoke_test_notebook.ipynb`
+### `03_data_quality_smoke_test_notebook.ipynb`
 **Purpose:** Pre-production and post-change validation gate  
 **When to run:** Before enabling schedules, and after schema/code changes  
 **What it does:**
@@ -273,7 +319,7 @@ If any contract fails, the notebook raises an error and should block promotion/s
 
 ---
 
-### `data_quality_rerun_failed_notebook.ipynb`
+### `06_data_quality_rerun_failed_notebook.ipynb`
 **Purpose:** Rerun checks that failed or errored in a previous run  
 **When to run:** After a validation job run that has FAIL or ERROR results  
 **What it does:**
@@ -289,7 +335,7 @@ TARGET_DATE = None  # None = today, or set to "2026-03-21" for a specific date
 
 ---
 
-### `data_quality_rerun_check_notebook.ipynb`
+### `05_data_quality_rerun_check_notebook.ipynb`
 **Purpose:** Rerun a specific check on demand  
 **When to run:** Anytime you want to force a check to run, regardless of `run_frequency` or whether it ran today  
 **What it does:**
@@ -298,15 +344,15 @@ TARGET_DATE = None  # None = today, or set to "2026-03-21" for a specific date
 3. Resolves `workspace_id/dataset_id` from registry for identity-safe execution
 4. Executes the DAX and writes new results with a fresh `run_id`
 
-**Interactive — no hardcoded values needed.** Just run the cells in order and enter values when prompted.
+**Configurable via Parameters:** Set `CHECK_NAME` and optional targets directly in the parameter cell at the top of the notebook. This makes the notebook natively compatible with Fabric Pipelines for automated targeted reruns.
 
 Identity note:
-- If you provide `model_name`, you must also provide `dataset_name` so the notebook can resolve stable IDs.
-- If `model_name + dataset_name` still maps to multiple rows, provide `workspace_name` to disambiguate.
+- If you provide `MODEL_NAME`, you must also provide `DATASET_NAME` so the notebook can resolve stable IDs.
+- If `MODEL_NAME + DATASET_NAME` still maps to multiple rows, provide `WORKSPACE_NAME` to disambiguate.
 
 ---
 
-### `power_bi_queries_notebook.ipynb`
+### `08_power_bi_queries_notebook.ipynb`
 **Purpose:** Sample SQL queries for Power BI analytics  
 **When to use:** When building dashboards in Power BI Desktop  
 **What it contains:**
@@ -380,6 +426,37 @@ WHERE run_id = '12345678-abcd-1234-abcd-1234567890ab'
 1. **Baseline:** For each `check_name`, the baseline comes from `check_baseline_config`.
    - `MODEL` mode compares against the active row where `is_baseline = true`
    - `STATIC` mode compares against `static_baseline_value`
+
+### Baseline Mode Behavior (Execution)
+
+This is the key distinction:
+
+- In **both** modes, each active model row still executes its own `dax_expression` to produce `result_value`.
+- `MODEL` mode uses one active baseline row (`is_baseline = true`) and executes that baseline row's DAX to get `baseline_value`.
+- `STATIC` mode does **not** execute a baseline model DAX. It uses `static_baseline_value` directly as `baseline_value`.
+- If you add another model row under the same `check_name`, that row is also evaluated and compared to the same baseline (model-based or static, depending on mode).
+
+```mermaid
+flowchart TD
+   A[Start check_name run] --> B{baseline_mode}
+   B -->|MODEL| C[Resolve active baseline row]
+   C --> D[Execute baseline row DAX]
+   D --> E[baseline_value from baseline row result]
+   B -->|STATIC| F[Read static_baseline_value]
+   F --> E
+   E --> G[Loop active model rows for this check_name]
+   G --> H[Execute row dax_expression]
+   H --> I[result_value]
+   I --> J[Compute delta vs baseline_value]
+   J --> K[Apply row fail_delta_pct_threshold]
+   K --> L[Write PASS / FAIL / ERROR]
+```
+
+### Notes
+
+- `STATIC` means "static baseline", not "skip row evaluation".
+- If a row has no valid `dax_expression`, the system cannot compute `result_value` for that row and will produce `ERROR`.
+- `fail_delta_pct_threshold` is a percent value: `0.30` means `0.30%`, while `30.0` means `30%`.
 
 2. **Delta Calculation:**
    ```text
@@ -462,14 +539,15 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 ## Troubleshooting
 
 ### Preflight Connectivity Warning Appears
-- This means at least one `workspace_name` / `dataset_name` pair in `check_registry` could not be reached.
-- Verify the row's `workspace_id` and `dataset_id` map to the expected model (IDs are the stable identity).
+- This means the DAX executor could not reach the semantic model.
+- Execution safely uses `workspace_id` and `dataset_id` to connect natively, avoiding name collision issues. Verify these GUIDs in the `check_registry` are correct.
 - Open the semantic model in Fabric and confirm it still exists and is accessible.
 - Confirm the exact names in `check_registry` match Fabric names (including spaces/case).
 - Re-run the job; unreachable models will produce `ERROR` rows with details.
 
 ### DAX Timed Out
 - Look for `DAX execution timed out` in `error_message`.
+- Execution timeouts are strictly enforced via background threads to prevent the notebook from hanging.
 - This usually means the DAX expression is expensive or the model is under load.
 - Test the DAX directly in the semantic model and optimize measures if needed.
 - If required, increase timeout in notebook config (`DAX_TIMEOUT_SECONDS`) after validation.
@@ -503,9 +581,9 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 
 ### Deployment and Promotion
 - Edit environment values in `config.py` in your Fabric Lakehouse at `/Files/code/config.py`.
-- Run notebooks in order: config_notebook -> setup -> add_checks -> smoke_test -> validation_job.
-- Use update_checks/delete_checks/rerun notebooks for ongoing operations after initial rollout.
-- Do not schedule jobs until smoke test passes.
+- Run notebooks in order: `01_data_quality_setup_notebook.ipynb` -> `02_data_quality_manage_checks_notebook.ipynb` -> `03_data_quality_smoke_test_notebook.ipynb` -> `04_data_quality_validation_job_notebook.ipynb`.
+- Use the `05`, `06`, and `07` notebooks for ongoing operations after initial rollout.
+- Do not schedule `04` until the `03` smoke test passes.
 
 ### Concurrency Policy
 - `check_registry` is treated as a concurrent-write table.
@@ -534,7 +612,7 @@ If you set a check to `MULTIPLE_PER_DAY`, the job **won't skip it** on re-runs. 
 2. **Schedule the validation job** to run daily (e.g., 6am)
 3. **Share the results table** with your team (they can query `validation_results`)
 4. **Optional — Build Power BI Dashboard:** 
-   - Open `power_bi_queries_notebook.ipynb` in Fabric
+   - Open `08_power_bi_queries_notebook.ipynb` in Fabric
    - Copy the dimension and fact queries to Power BI Desktop
    - Connect to OneLake and load the tables
    - Create relationships and build visualizations for a live health dashboard
@@ -564,6 +642,7 @@ For issues or questions:
 
 ---
 
-**Version:** 1.0  
-**Last Updated:** March 20, 2026
+**Version:** 1.1  
+**Last Updated:** March 22, 2026
+
 
